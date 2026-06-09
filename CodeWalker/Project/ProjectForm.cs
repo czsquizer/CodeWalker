@@ -1871,6 +1871,42 @@ namespace CodeWalker.Project
             else if (sel.Audio?.StaticEmitter != null) return NewAudioStaticEmitter(sel.Audio, copyPosition, selectNew);
             return null;
         }
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            //Make the plain Delete key delete the currently-selected project item (scenario point, entity, etc.),
+            //exactly like the panel Delete buttons / the world-view Delete key. The project's "Delete Item" menu
+            //was only bound to Shift+Delete (and had no handler), so the keyboard couldn't delete anything before.
+            //Skipped while a text field is focused so that character-delete keeps working in the edit panels.
+            if (keyData == Keys.Delete)
+            {
+                if (!IsEditingTextControl())
+                {
+                    var wf = WorldForm;
+                    if ((wf != null) && wf.CurrentMapSelection.HasValue)
+                    {
+                        DeleteObject(wf.CurrentMapSelection);
+                        return true;
+                    }
+                }
+            }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+        private bool IsEditingTextControl()
+        {
+            //walk down to the leaf focused control (panels are nested containers)
+            Control c = ActiveControl;
+            while ((c is ContainerControl) && (((ContainerControl)c).ActiveControl != null))
+            {
+                c = ((ContainerControl)c).ActiveControl;
+            }
+            if (c == null) return false;
+            if (c is TextBoxBase) return true;
+            if (c is NumericUpDown) return true;
+            var cb = c as ComboBox;
+            if ((cb != null) && (cb.DropDownStyle != ComboBoxStyle.DropDownList)) return true; //typable combo
+            if (c.GetType().Name.IndexOf("TextBox", StringComparison.OrdinalIgnoreCase) >= 0) return true; //eg. FastColoredTextBox xml editor
+            return false;
+        }
         public void DeleteObject(MapSelection sel)
         {
             SetObject(ref sel);

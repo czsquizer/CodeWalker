@@ -5193,8 +5193,11 @@ namespace CodeWalker.GameFiles
 
                     foreach (var e in Edges)
                     {
-                        e.NodeIndexFrom = (ushort)e.NodeFrom.NodeIndex;
-                        e.NodeIndexTo = (ushort)e.NodeTo.NodeIndex;
+                        //null-guard: an edge may have an unlinked endpoint when editing an already-imperfect
+                        //graph (eg. a previously-corrupt file) - don't NRE here, the save-time RebuildChains
+                        //will drop any such dangling edge anyway.
+                        if (e.NodeFrom != null) e.NodeIndexFrom = (ushort)e.NodeFrom.NodeIndex;
+                        if (e.NodeTo != null) e.NodeIndexTo = (ushort)e.NodeTo.NodeIndex;
                     }
 
                 }

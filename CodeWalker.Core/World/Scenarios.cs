@@ -1495,10 +1495,120 @@ namespace CodeWalker.World
         public void RebuildChains()
         {
             if (Region == null) return;
+            var paths = Region.Paths;
+            if (paths == null) return;
 
-            //update chain nodes array, update from/to indexes
-            //currently not necessary - editor updates indexes and arrays already.
+            // Fully re-index the scenario chaining graph so the saved .ymt is ALWAYS internally
+            // consistent, no matter what edits (deletes, adds) the editor performed. This is the
+            // single guarantee that deleting points can never produce a corrupt/crashing file:
+            //  - drops dangling / orphaned edges (NodeFrom/NodeTo null or not in Nodes[])
+            //  - drops orphan nodes (not referenced by any surviving edge => node.Chain==null => crashes)
+            //  - rebuilds every chain's EdgeIds from its (reliable) object-ref Edges[], renumbered
+            //  - drops chains left empty, renumbers Nodes/Edges/Chains contiguously
+            //  - recomputes HasIncoming/HasOutgoingEdges flags and node.Chain back-refs
+            // The on-disk indices (edge.NodeIndexFrom/To, chain.EdgeIds) are derived here from the
+            // object reference graph (edge.NodeFrom/NodeTo, chain.Edges, node.NodeIndex), which the
+            // editor keeps correct - unlike chain.EdgeIds, which goes stale for sibling chains on remove.
 
+            var oldNodes = paths.Nodes ?? new MCScenarioChainingNode[0];
+            var oldEdges = paths.Edges ?? new MCScenarioChainingEdge[0];
+            var oldChains = paths.Chains ?? new MCScenarioChain[0];
+
+            var nodeSet = new HashSet<MCScenarioChainingNode>(oldNodes);
+            var edgeSet = new HashSet<MCScenarioChainingEdge>(oldEdges);
+
+            // 1. Determine surviving edges/nodes from the chains' object-ref edge lists.
+            var keepEdges = new HashSet<MCScenarioChainingEdge>();
+            var keepNodes = new HashSet<MCScenarioChainingNode>();
+            var survChains = new List<MCScenarioChain>();
+            int linkedEdgeCount = 0;
+            foreach (var chain in oldChains)
+            {
+                if (chain == null) continue;
+                var ce = chain.Edges;
+                if (ce == null) continue;
+                bool any = false;
+                foreach (var e in ce)
+                {
+                    if (e == null) continue;
+                    linkedEdgeCount++;
+                    if (!edgeSet.Contains(e)) continue;          // edge no longer part of the graph
+                    if ((e.NodeFrom == null) || (e.NodeTo == null)) continue; // dangling edge
+                    if (!nodeSet.Contains(e.NodeFrom) || !nodeSet.Contains(e.NodeTo)) continue; // endpoints removed
+                    keepEdges.Add(e);
+                    keepNodes.Add(e.NodeFrom);
+                    keepNodes.Add(e.NodeTo);
+                    any = true;
+                }
+                if (any) survChains.Add(chain);
+            }
+
+            // Safety: if the object-ref link graph was never built (chains have EdgeIds but no Edges[]),
+            // do NOT nuke the graph - leave the existing arrays untouched rather than risk data loss.
+            if ((linkedEdgeCount == 0) && (oldEdges.Length > 0) && (oldChains.Length > 0))
+            {
+                return;
+            }
+
+            // 2. Rebuild Nodes[] preserving original order, renumber, reset flags/back-refs.
+            var newNodes = new List<MCScenarioChainingNode>();
+            foreach (var n in oldNodes)
+            {
+                if (n == null) continue;
+                if (!keepNodes.Contains(n)) continue;
+                n.NodeIndex = newNodes.Count;
+                n.HasIncomingEdges = false;
+                n.HasOutgoingEdges = false;
+                n.Chain = null;
+                newNodes.Add(n);
+            }
+
+            // 3. Rebuild Edges[] preserving original order, renumber.
+            var newEdges = new List<MCScenarioChainingEdge>();
+            foreach (var e in oldEdges)
+            {
+                if (e == null) continue;
+                if (!keepEdges.Contains(e)) continue;
+                e.EdgeIndex = newEdges.Count;
+                newEdges.Add(e);
+            }
+
+            // 4. Re-derive each edge's node indices and recompute node degree flags.
+            foreach (var e in newEdges)
+            {
+                e.NodeIndexFrom = (ushort)e.NodeFrom.NodeIndex;
+                e.NodeIndexTo = (ushort)e.NodeTo.NodeIndex;
+                e.NodeFrom.HasOutgoingEdges = true;
+                e.NodeTo.HasIncomingEdges = true;
+            }
+
+            // 5. Rebuild each surviving chain's EdgeIds + Edges from kept edges (in chain order),
+            //    set node.Chain back-refs, drop chains that ended up empty, renumber chains.
+            var finalChains = new List<MCScenarioChain>();
+            foreach (var chain in survChains)
+            {
+                var ids = new List<ushort>();
+                var es = new List<MCScenarioChainingEdge>();
+                foreach (var e in chain.Edges)
+                {
+                    if (e == null) continue;
+                    if (!keepEdges.Contains(e)) continue;
+                    es.Add(e);
+                    ids.Add((ushort)e.EdgeIndex);
+                    if (e.NodeFrom != null) e.NodeFrom.Chain = chain;
+                    if (e.NodeTo != null) e.NodeTo.Chain = chain;
+                }
+                if (es.Count == 0) continue;
+                chain.Edges = es.ToArray();
+                chain.EdgeIds = ids.ToArray();
+                chain.ChainIndex = finalChains.Count;
+                finalChains.Add(chain);
+            }
+
+            // 6. Commit the rebuilt, fully-consistent arrays.
+            paths.Nodes = newNodes.ToArray();
+            paths.Edges = newEdges.ToArray();
+            paths.Chains = finalChains.ToArray();
         }
 
 

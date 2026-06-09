@@ -1446,10 +1446,10 @@ namespace CodeWalker
                         if (fnode != null)
                         {
                             vpoint = fnode.MyPoint ?? fnode.ClusterMyPoint;
-                            vhash = vpoint.ModelSet?.NameHash ?? 493038497;//"none"
+                            vhash = vpoint?.ModelSet?.NameHash ?? 493038497;//"none" (vpoint may be null for an orphan/corrupt chain node)
                             if ((vhash == 0) || (vhash == 493038497))
                             {
-                                vhash = vpoint.Type?.VehicleModelSetHash ?? 0;
+                                vhash = vpoint?.Type?.VehicleModelSetHash ?? 0;
                             }
                         }
                     }
